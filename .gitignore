@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+build/CopyAny/
+build/work-*/
+*.spec
+
+# 构建产物（通过 GitHub Releases 分发，不提交到代码库）
+dist/

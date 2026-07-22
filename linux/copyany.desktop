@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=CopyAny
+Name[zh_CN]=CopyAny 剪贴板共享
+Comment=跨设备剪贴板历史共享
+Comment[zh_CN]=跨设备剪贴板历史共享
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=false
+Categories=Utility;
+Keywords=clipboard;sync;share;
+StartupNotify=false

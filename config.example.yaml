@@ -1,0 +1,24 @@
+# CopyAny 配置示例 —— 实际生效的配置在:
+#   Windows: %APPDATA%\CopyAny\config.yaml
+#   Linux:   ~/.config/copyany/config.yaml
+group_id: "my-group"            # 群组标识: 同一群组的设备共享剪贴板历史
+shared_key: "please-change-me"  # 共享密钥(至少 8 位), 同群组所有设备必须一致
+
+listen:
+  host: "0.0.0.0"
+  port: 9527                    # 本机监听端口(防火墙需放行 TCP)
+
+peers:                          # 其他设备的 IP 列表
+  - host: "192.168.1.100"
+    port: 9527
+  - host: "192.168.1.101"
+    port: 9527
+
+history:
+  max_items: 1000               # 历史记录上限(置顶条目不会被清理)
+
+hotkey:
+  key: "ctrl+q"                 # 呼出历史面板的全局快捷键
+
+clipboard:
+  auto_receive: false           # 对端复制的内容自动写入本机剪贴板(面板底部有开关)
