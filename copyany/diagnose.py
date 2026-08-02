@@ -11,6 +11,7 @@ import hmac as std_hmac
 import json
 import os
 import socket
+import struct
 import time
 
 from . import crypto
@@ -208,16 +209,72 @@ def _key_advice() -> list[str]:
 
 # ---------- 本机自检 ----------
 
+def _local_ips_windows() -> list[str]:
+    """Windows: 用 GetIpAddrTable 枚举所有网卡的 IPv4, 不依赖 DNS 和外网路由。"""
+    import ctypes
+    from ctypes import wintypes
+    ips: list[str] = []
+    try:
+        size = wintypes.DWORD(0)
+        # 第一次调用只为拿到缓冲区大小(返回 ERROR_INSUFFICIENT_BUFFER 属正常)
+        ctypes.windll.iphlpapi.GetIpAddrTable(None, ctypes.byref(size), False)
+        if size.value == 0:
+            return ips
+        buf = (ctypes.c_char * size.value)()
+        if ctypes.windll.iphlpapi.GetIpAddrTable(buf, ctypes.byref(size), False) != 0:
+            return ips
+        num = struct.unpack_from("<I", buf, 0)[0]
+        off = 4
+        for _ in range(num):  # MIB_IPADDRROW 固定 24 字节, dwAddr 在最前(网络字节序)
+            dw_addr = struct.unpack_from("<I", buf, off)[0]
+            off += 24
+            ip = socket.inet_ntoa(struct.pack("<I", dw_addr))
+            if not ip.startswith("127.") and ip != "0.0.0.0" and ip not in ips:
+                ips.append(ip)
+    except (AttributeError, OSError):
+        pass
+    return ips
+
+
+def _local_ips_ifconf() -> list[str]:
+    """Linux: 用 SIOCGIFCONF 枚举网卡 IPv4, 不依赖 DNS 和外网路由。"""
+    import array
+    import fcntl
+    ips: list[str] = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            names = array.array("B", b"\0" * 4096)
+            out = fcntl.ioctl(s.fileno(), 0x8912,  # SIOCGIFCONF
+                              struct.pack("iL", 4096, names.buffer_info()[0]))
+            data = names.tobytes()[:struct.unpack("iL", out)[0]]
+        for off in range(0, len(data), 40):  # ifreq 40 字节, IPv4 地址在偏移 20
+            ip = socket.inet_ntoa(data[off + 20:off + 24])
+            if not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
+    except (AttributeError, ImportError, OSError):
+        pass
+    return ips
+
+
 def local_ips() -> list[str]:
     """本机可用的局域网 IPv4(让对方填这些), 失败时返回空列表。"""
     ips: list[str] = []
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ips.append(s.getsockname()[0])
-        s.close()
-    except OSError:
-        pass
+    # 1) UDP 路由探测: 拿到默认出口的主 IP 放最前。公司内网可能没有到
+    #    8.8.8.8 的路由, 所以同时尝试几个私网地址(本机所在网段必有相连路由)。
+    for target in ("8.8.8.8", "192.168.0.1", "10.0.0.1", "172.16.0.1", "100.64.0.1"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((target, 80))
+                ip = s.getsockname()[0]
+            if not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
+        except OSError:
+            continue
+    # 2) 直接枚举网卡地址: 内网无外网路由、主机名无法解析时也能拿到全部 IP
+    for ip in (_local_ips_windows() if os.name == "nt" else _local_ips_ifconf()):
+        if ip not in ips:
+            ips.append(ip)
+    # 3) 主机名解析兜底
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
             ip = info[4][0]
