@@ -21,6 +21,7 @@ DEFAULT_CONFIG: dict = {
     "group_id": "my-group",
     "shared_key": "please-change-me",
     "listen": {"host": "0.0.0.0", "port": 9527},
+    "local_ip": "",                  # 手动指定本机 IPv4(留空则自动获取)
     "peers": [],                       # [{"host": "192.168.1.100", "port": 9527}]
     "history": {"max_items": 1000},
     "hotkey": {"key": "ctrl+q"},
@@ -35,6 +36,8 @@ shared_key: "please-change-me"  # 共享密钥(至少 8 位), 同群组所有设
 listen:
   host: "0.0.0.0"
   port: 9527                    # 本机监听端口(防火墙需放行 TCP)
+
+local_ip: ""                    # 手动指定本机 IPv4(留空自动获取; 多网卡/内网识别不准时填写)
 
 peers: []                       # 其他设备, 去掉注释填写对端 IP:
 # peers:

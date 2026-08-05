@@ -124,16 +124,55 @@ def main() -> int:
         dlg.group_edit.setText("smoke-group")
         dlg.key_edit.setText("smoke-key-123")
         dlg.peers_edit.setPlainText("127.0.0.1:19527\n# 注释行\n192.168.1.2")
+        dlg.ip_edit.setText("10.26.42.142")
         saved = {}
         dlg.configSaved.connect(lambda c: saved.update(c))
         dlg._on_save()
         assert saved["peers"] == [{"host": "127.0.0.1", "port": 19527},
                                   {"host": "192.168.1.2", "port": 9527}], saved["peers"]
+        assert saved["local_ip"] == "10.26.42.142", saved.get("local_ip")
         assert saved["hotkey"]["key"]
         assert isinstance(saved["clipboard"]["auto_receive"], bool), saved.get("clipboard")
         app._apply_config(saved)         # 网络层热重启
 
     check("设置对话框解析 + 配置热生效", settings_dialog)
+
+    def settings_dialog_bad_ip():
+        # 非法本机 IP 应被拒绝保存(弹窗类打桩, 避免离屏模态阻塞)
+        from copyany.gui import dialogs as dlgmod
+
+        class _FakeMB:
+            warning = staticmethod(lambda *a, **k: None)
+            information = staticmethod(lambda *a, **k: None)
+
+        orig_mb = dlgmod.QMessageBox
+        dlgmod.QMessageBox = _FakeMB
+        try:
+            dlg = SettingsDialog(app.cfg, parent=app.panel)
+            dlg.key_edit.setText("smoke-key-123")
+            dlg.ip_edit.setText("999.1.2.3")
+            saved = {}
+            dlg.configSaved.connect(lambda c: saved.update(c))
+            dlg._on_save()
+            assert not saved, f"非法 IP 不应保存: {saved}"
+        finally:
+            dlgmod.QMessageBox = orig_mb
+
+    check("设置对话框拒绝非法本机 IP", settings_dialog_bad_ip)
+
+    def settings_fetch_ip():
+        import time
+        dlg = SettingsDialog(app.cfg, parent=app.panel)
+        dlg.ip_edit.clear()
+        dlg.ip_btn.click()
+        deadline = time.time() + 15
+        while dlg._fetching_ip and time.time() < deadline:  # 等后台探测线程回传
+            qapp.processEvents()
+            time.sleep(0.05)
+        qapp.processEvents()
+        assert dlg.ip_edit.text().strip(), "获取 IP 后输入框应有检测到的 IP"
+
+    check("设置-获取 IP 按钮填入检测结果", settings_fetch_ip)
 
     def settings_test_conn():
         import time

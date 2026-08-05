@@ -124,6 +124,27 @@ def main() -> int:
     check("本机自检: 提示未配对端", by_name["对端配置"]["ok"] is False, str(steps))
     check("本机自检: 给出本机 IP", by_name["本机 IP"]["ok"] is True, str(steps))
 
+    # 8. 手动指定本机 IP: 测试/诊断完全跳过自动探测
+    orig_local_ips = diagnose.local_ips
+
+    def _boom():
+        raise RuntimeError("手动模式不应调用自动探测")
+
+    diagnose.local_ips = _boom
+    try:
+        check("手动 IP: display_ips 直接返回输入值",
+              diagnose.display_ips({"local_ip": "10.26.42.142"}) == ["10.26.42.142"])
+        steps = diagnose.local_checks(
+            {"listen": {"port": PORT}, "peers": [], "local_ip": "10.26.42.142"}, node)
+        by_name = {s["name"]: s for s in steps}
+        check("手动 IP: 本机 IP 步使用输入值并标注手动",
+              by_name["本机 IP"]["ok"] is True
+              and "10.26.42.142" in by_name["本机 IP"]["detail"]
+              and "手动指定" in by_name["本机 IP"]["detail"], str(steps))
+    finally:
+        diagnose.local_ips = orig_local_ips
+    check("自动模式: display_ips 等同自动检测", diagnose.display_ips({}) == diagnose.local_ips())
+
     node.stop()
     print(f"\n结果: {PASS} 通过, {FAIL} 失败")
     return 1 if FAIL else 0

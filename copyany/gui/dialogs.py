@@ -1,6 +1,7 @@
 """设置对话框: 修改全部配置, 保存后即时生效; 内置连接测试(逐步诊断失败原因)。"""
 from __future__ import annotations
 
+import ipaddress
 import threading
 
 from PySide6.QtCore import Signal
@@ -16,6 +17,7 @@ from .. import diagnose
 class SettingsDialog(QDialog):
     configSaved = Signal(dict)
     _testDone = Signal(object)  # 诊断线程 -> GUI 线程
+    _ipFetched = Signal(list)   # 获取 IP 线程 -> GUI 线程
 
     def __init__(self, cfg: dict, node=None, parent=None):
         super().__init__(parent)
@@ -23,6 +25,7 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(460)
         self._node = node
         self._testing = False
+        self._fetching_ip = False
         self._device_id = str(cfg.get("device_id") or "")   # 设备标识随配置保存, 不能丢
 
         root = QVBoxLayout(self)
@@ -56,6 +59,19 @@ class SettingsDialog(QDialog):
         self.peers_edit.setPlainText("\n".join(lines))
         self.peers_edit.setFixedHeight(96)
         form.addRow("对端设备", self.peers_edit)
+
+        # ---- 本机 IP(手动指定, 留空自动获取) ----
+        ip_row = QHBoxLayout()
+        self.ip_edit = QLineEdit(str(cfg.get("local_ip") or ""))
+        self.ip_edit.setPlaceholderText("留空则自动获取; 多网卡或内网识别不准时手动填写")
+        ip_row.addWidget(self.ip_edit, 1)
+        self.ip_btn = QPushButton("获取 IP")
+        self.ip_btn.setObjectName("ghost")
+        self.ip_btn.setToolTip("自动检测本机 IP 并填入(有多个网卡时取主 IP,\n候选列表见输入框提示, 可再手动改成需要的那个)")
+        self.ip_btn.clicked.connect(self._fetch_ip)
+        ip_row.addWidget(self.ip_btn)
+        form.addRow("本机 IP", ip_row)
+        self._ipFetched.connect(self._on_ip_fetched)
 
         self.max_spin = QSpinBox()
         self.max_spin.setRange(10, 100000)
@@ -126,11 +142,20 @@ class SettingsDialog(QDialog):
             except ValueError:
                 QMessageBox.warning(self, "CopyAny", f"对端格式错误: {line}\n应为 IP:端口, 如 192.168.1.100:9527")
                 return None
+        local_ip = self.ip_edit.text().strip()
+        if local_ip:
+            try:
+                ipaddress.IPv4Address(local_ip)
+            except ValueError:
+                QMessageBox.warning(self, "CopyAny",
+                                    f"本机 IP 格式错误: {local_ip}\n应为 IPv4 地址, 如 192.168.1.100")
+                return None
         hotkey = self.hotkey_edit.keySequence().toString(QKeySequence.SequenceFormat.NativeText)
         cfg = {
             "group_id": group_id,
             "shared_key": shared_key,
             "listen": {"host": "0.0.0.0", "port": self.port_spin.value()},
+            "local_ip": local_ip,
             "peers": peers,
             "history": {"max_items": self.max_spin.value()},
             "hotkey": {"key": hotkey.lower() or "ctrl+q"},
@@ -147,6 +172,31 @@ class SettingsDialog(QDialog):
         self.configSaved.emit(cfg)
         self.accept()
 
+    # ---------- 本机 IP 获取 ----------
+
+    def _fetch_ip(self) -> None:
+        if self._fetching_ip:
+            return
+        self._fetching_ip = True
+        self.ip_btn.setEnabled(False)
+        self.ip_btn.setText("获取中…")
+        threading.Thread(target=self._fetch_ip_worker,
+                         name="copyany-fetch-ip", daemon=True).start()
+
+    def _fetch_ip_worker(self) -> None:
+        self._ipFetched.emit(diagnose.local_ips())
+
+    def _on_ip_fetched(self, ips: list) -> None:
+        self._fetching_ip = False
+        self.ip_btn.setEnabled(True)
+        self.ip_btn.setText("获取 IP")
+        if ips:
+            self.ip_edit.setText(ips[0])
+            self.ip_edit.setToolTip("检测到 " + str(len(ips)) + " 个: " + ", ".join(ips)
+                                    + ("\n已填入主 IP, 需要哪个就手动改成哪个" if len(ips) > 1 else ""))
+        else:
+            QMessageBox.information(self, "CopyAny", "未检测到本机 IP, 请手动输入")
+
     # ---------- 连接测试 ----------
 
     def _run_test(self) -> None:
@@ -159,7 +209,7 @@ class SettingsDialog(QDialog):
             self.test_out.setVisible(True)
             self.test_out.setPlainText(
                 "未填写任何对端设备。\n\n至少一方需要把对方的 IP:端口 填进\"对端设备\"; "
-                "两端互填最稳妥。\n本机 IP: " + (", ".join(diagnose.local_ips()) or "未获取"))
+                "两端互填最稳妥。\n本机 IP: " + (", ".join(diagnose.display_ips(cfg)) or "未获取"))
             return
         self._testing = True
         self.test_btn.setEnabled(False)

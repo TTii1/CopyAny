@@ -285,6 +285,13 @@ def local_ips() -> list[str]:
     return ips
 
 
+def display_ips(cfg: dict | None) -> list[str]:
+    """给对方填写用的本机 IP: 配置里手动指定了 local_ip 就直接使用,
+    完全跳过自动探测(多网卡/内网自动识别不准时的正确入口), 否则自动获取。"""
+    manual = str((cfg or {}).get("local_ip") or "").strip()
+    return [manual] if manual else local_ips()
+
+
 def local_checks(cfg: dict, node=None) -> list[dict]:
     """本机侧检查: 监听状态 / 本机 IP / 是否配置了对端。返回 step 列表。"""
     steps: list[dict] = []
@@ -297,10 +304,14 @@ def local_checks(cfg: dict, node=None) -> list[dict]:
         steps.append(_step("本机监听", None, f"端口 {port}(未获取运行状态)"))
     else:
         steps.append(_step("本机监听", True, f"端口 {port} 正常监听中"))
-    ips = local_ips()
-    steps.append(_step("本机 IP", bool(ips),
-                       ", ".join(ips) + "(让对方把这个 IP 填进对端列表)" if ips
-                       else "未找到局域网 IP, 请检查网络连接"))
+    manual = str(cfg.get("local_ip") or "").strip()
+    ips = display_ips(cfg)
+    if ips:
+        detail = ", ".join(ips) + ("(手动指定, " if manual else "(") + "让对方把这个 IP 填进对端列表)"
+        steps.append(_step("本机 IP", True, detail))
+    else:
+        steps.append(_step("本机 IP", False,
+                           "未找到局域网 IP, 请检查网络连接, 或在设置里手动填写本机 IP"))
     if not cfg.get("peers"):
         steps.append(_step("对端配置", False,
                            "未填写任何对端 —— 至少一方要把对方 IP:端口 填进\"对端设备\""))
